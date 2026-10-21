@@ -48,6 +48,7 @@ def parse_args() -> None:
     program.add_argument('--keep-audio', help='keep original audio', dest='keep_audio', action='store_true', default=True)
     program.add_argument('--keep-frames', help='keep temporary frames', dest='keep_frames', action='store_true', default=False)
     program.add_argument('--many-faces', help='process every face', dest='many_faces', action='store_true', default=False)
+    program.add_argument('--opacity', help='blend the swapped face with the original (0.0-1.0)', type=float, default=1.0)
     program.add_argument('--nsfw-filter', help='filter the NSFW image or video', dest='nsfw_filter', action='store_true', default=False)
     program.add_argument('--map-faces', help='map source target faces', dest='map_faces', action='store_true', default=False)
     program.add_argument('--mouth-mask', help='mask the mouth region', dest='mouth_mask', action='store_true', default=False)
@@ -69,6 +70,8 @@ def parse_args() -> None:
     program.add_argument('--gpu-threads', help=argparse.SUPPRESS, dest='gpu_threads_deprecated', type=int)
 
     args = program.parse_args()
+    if not 0.0 <= args.opacity <= 1.0:
+        program.error('--opacity must be between 0.0 and 1.0')
 
     modules.globals.source_path = args.source_path
     modules.globals.target_path = args.target_path
@@ -81,6 +84,7 @@ def parse_args() -> None:
     modules.globals.keep_audio = args.keep_audio
     modules.globals.keep_frames = args.keep_frames
     modules.globals.many_faces = args.many_faces
+    modules.globals.opacity = args.opacity
     modules.globals.mouth_mask = args.mouth_mask
     modules.globals.nsfw_filter = args.nsfw_filter
     modules.globals.map_faces = args.map_faces

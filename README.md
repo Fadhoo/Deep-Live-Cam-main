@@ -70,7 +70,37 @@ Users are expected to use this software responsibly and legally. If using a real
 
 Perfect if you want the fastest setup with **zero manual installation**, pre-configured dependencies, and optimized builds for every supported platform.
 
+## Simple local video interface
+
+For a focused video-to-video workflow, launch the local web interface:
+
+```bash
+pip install -r requirements.txt
+python web_app.py
+```
+
+Open `http://127.0.0.1:7860` if your browser does not open automatically. Add an
+MP4 or MKV video and a JPG/PNG/BMP/WebP face image. Set **Effect blend** from
+0% (original face) to 100% (full swap), then choose **Preview a frame**. Pick a
+time in the video to inspect another frame. The Result/Compare toggle and reveal
+slider show the original and swapped versions of that frame. Choose **Create
+face swap** to render the entire video with the same blend. Processing uses the
+existing `run.py` pipeline. The result can be reviewed and downloaded on the page.
+
+Uploaded inputs are deleted after full processing. Preview-only uploads and
+completed outputs stay in `web_jobs/` until you delete them. The web server binds
+to localhost only. See [the interface research notes](docs/web-interface-research.md)
+for the workflow decisions.
+
+The existing face-swap model and FFmpeg are required. The model may download on
+first use; see the installation instructions below if that fails. To use another
+port, pass `--port 7861`.
+
+The command line also accepts `--opacity 0.0` through `--opacity 1.0` for the
+same effect blend.
+
 ## TLDR; Live Deepfake in just 3 Clicks
+
 ![easysteps](https://github.com/user-attachments/assets/af825228-852c-411b-b787-ffd9aac72fc6)
 1. Select a face
 2. Select which camera to use

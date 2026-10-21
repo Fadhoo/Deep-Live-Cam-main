@@ -17,6 +17,7 @@ temp/
 venv/
 env/
 workflow/
+web_jobs/
 gfpgan/
 models/inswapper_128.onnx
 models/GFPGANv1.4.pth
