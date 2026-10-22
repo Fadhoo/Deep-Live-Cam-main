@@ -88,9 +88,18 @@
           <div id="progress-track" class="progress-track"><div class="progress-bar"></div></div>
           <a id="download-link" class="download-button" href="#" hidden>Download result <span aria-hidden="true">↓</span></a>
           <video id="result-video" class="result-video" controls playsinline hidden></video>
+          <div class="job-actions">
+            <button id="cancel-button" type="button" hidden>Cancel processing</button>
+            <button id="delete-button" type="button" hidden>Delete this job and its files</button>
+          </div>
           <details id="job-details" hidden><summary>Processing details</summary><pre id="job-logs"></pre></details>
         </section>
       </form>
+
+      <section class="saved-results" aria-labelledby="saved-results-title">
+        <h2 id="saved-results-title">Saved results</h2>
+        <div id="saved-results-list"><p>Loading saved results…</p></div>
+      </section>
 
       <p class="footnote">The result is synthetic media. Label it clearly if you share it.</p>
     </main>

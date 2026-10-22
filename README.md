@@ -87,14 +87,21 @@ slider show the original and swapped versions of that frame. Choose **Create
 face swap** to render the entire video with the same blend. Processing uses the
 existing `run.py` pipeline. The result can be reviewed and downloaded on the page.
 
-Uploaded inputs are deleted after full processing. Preview-only uploads and
-completed outputs stay in `web_jobs/` until you delete them. The web server binds
-to localhost only. See [the interface research notes](docs/web-interface-research.md)
-for the workflow decisions.
+Uploaded inputs are deleted after full processing. You can cancel a running job
+or delete a staged job or result from the page. Abandoned staged uploads older
+than seven days are removed on the next app start or visit. Completed outputs
+remain in **Saved results** until you delete them. Results can be downloaded
+again after a server restart.
+Preview processing is limited to 15 minutes and video processing to four hours.
+The web server binds to localhost only. See
+[the interface research notes](docs/web-interface-research.md) for the workflow decisions.
 
 The existing face-swap model and FFmpeg are required. The model may download on
 first use; see the installation instructions below if that fails. To use another
-port, pass `--port 7861`.
+port, pass `--port 7861`. The web interface uses the CPU provider by default
+so it runs on machines whose ONNX Runtime package advertises an unavailable GPU.
+To select an installed accelerator, set `DLC_WEB_EXECUTION_PROVIDER` (for
+example, `cuda` or `dml`) before starting `web_app.py`.
 
 The command line also accepts `--opacity 0.0` through `--opacity 1.0` for the
 same effect blend.

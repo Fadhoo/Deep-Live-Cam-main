@@ -4,8 +4,8 @@ Imported once at startup to expose typed flags the rest of the codebase
 can branch on without re-querying `platform`, `torch.cuda`, or
 `onnxruntime.get_available_providers()` repeatedly.
 
-The banner printed by :func:`print_banner` is the single user-facing
-report of which code path the app will take.
+The banner printed by :func:`print_banner` reports which ONNX providers are
+installed. The selected provider is chosen later by the command-line arguments.
 """
 from __future__ import annotations
 
@@ -82,10 +82,10 @@ def accelerator_label() -> str:
 
 
 def print_banner() -> None:
-    """Print a one-line summary of the platform + accelerator selection."""
+    """Print the platform and installed providers without claiming GPU hardware."""
     os_label = f"{_platform.system()} {_platform.machine()}"
     print(
         f"[platform] {os_label} | python {sys.version.split()[0]} | "
-        f"accelerator: {accelerator_label()} | providers: {ONNX_PROVIDERS}",
+        f"available providers: {ONNX_PROVIDERS}",
         flush=True,
     )

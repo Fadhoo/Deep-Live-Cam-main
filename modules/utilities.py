@@ -208,7 +208,7 @@ def restore_audio(target_path: str, output_path: str) -> None:
             "-map",
             "0:v:0",
             "-map",
-            "1:a:0",
+            "1:a:0?",
             "-y",
             output_path,
         ]
