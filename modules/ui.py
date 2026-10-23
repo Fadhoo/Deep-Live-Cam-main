@@ -17,7 +17,6 @@ import sys
 import tempfile
 import threading
 import time
-import webbrowser
 from typing import Callable, List, Optional, Tuple
 
 import cv2
@@ -85,8 +84,8 @@ import json
 
 # ─── constants ────────────────────────────────────────────────────────────
 
-ROOT_HEIGHT = 820
-ROOT_WIDTH = 640
+ROOT_HEIGHT = 780
+ROOT_WIDTH = 900
 
 PREVIEW_MAX_HEIGHT = 700
 PREVIEW_MAX_WIDTH = 1200
@@ -110,12 +109,18 @@ SOURCE_TARGET_PREVIEW_SIZE = 200
 # ─── modern dark stylesheet ───────────────────────────────────────────────
 
 QSS = """
-QMainWindow, QDialog { background-color: #1e1e1e; color: #e6e6e6; }
-QWidget { color: #e6e6e6; font-family: "Segoe UI", "SF Pro Display", "Helvetica Neue", Arial, sans-serif; font-size: 11pt; }
+QMainWindow, QDialog { background-color: #171b22; color: #f2f5f9; }
+QWidget { color: #e8edf4; font-family: "Segoe UI", "SF Pro Display", "Helvetica Neue", Arial, sans-serif; font-size: 10pt; }
+QWidget#appHeader { background-color: #202833; border-bottom: 1px solid #344254; }
+QWidget#appFooter { background-color: #202833; border-top: 1px solid #344254; }
+QWidget#appContent { background-color: #171b22; }
+QLabel#appTitle { color: #f5f9ff; font-size: 19pt; font-weight: 700; }
+QLabel#appSubtitle { color: #aab9ca; font-size: 9pt; }
+QLabel#editionBadge { color: #b7d2ff; background-color: #293e60; border: 1px solid #3c6496; border-radius: 11px; padding: 5px 11px; font-size: 9pt; font-weight: 700; }
 
 QGroupBox {
-    background-color: #262626;
-    border: 1px solid #333333;
+    background-color: #222a35;
+    border: 1px solid #374456;
     border-radius: 10px;
     margin-top: 14px;
     padding-top: 18px;
@@ -125,24 +130,22 @@ QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
     padding: 0 8px;
-    color: #9ec5ff;
+    color: #c4ddff;
 }
 
 QPushButton {
-    background-color: #2d6cdf;
+    background-color: #3478e5;
     color: white;
     border: none;
     border-radius: 8px;
     padding: 8px 16px;
     font-weight: 600;
 }
-QPushButton:hover  { background-color: #3a7af0; }
-QPushButton:pressed{ background-color: #1d57c2; }
+QPushButton:hover  { background-color: #4a8df0; }
+QPushButton:pressed{ background-color: #215fbd; }
 QPushButton:disabled { background-color: #444; color: #888; }
-QPushButton#secondary {
-    background-color: #3a3a3a;
-}
-QPushButton#secondary:hover { background-color: #4a4a4a; }
+QPushButton#secondary { background-color: #334153; }
+QPushButton#secondary:hover { background-color: #40536b; }
 QPushButton#danger { background-color: #c2412d; }
 QPushButton#danger:hover  { background-color: #d8523c; }
 
@@ -191,21 +194,21 @@ QSlider::sub-page:horizontal {
 }
 
 QLabel#imageDrop {
-    background-color: #2a2a2a;
-    border: 2px dashed #444;
+    background-color: #19212b;
+    border: 2px dashed #50627a;
     border-radius: 8px;
 }
+QLabel#imageDrop:hover { border-color: #6aa4fa; }
 QLabel#statusLabel {
-    color: #b9b9b9;
-    font-size: 10pt;
-    font-style: italic;
+    color: #c0cede;
+    font-size: 9pt;
 }
 QLabel#linkLabel {
     color: #6ea8ff;
     text-decoration: underline;
 }
 
-QScrollArea { border: none; background: transparent; }
+QScrollArea { border: none; background: #171b22; }
 
 QFrame#card {
     background-color: #262626;
@@ -505,14 +508,44 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(
             f"{modules.metadata.name} {modules.metadata.version} {modules.metadata.edition}"
         )
-        self.setMinimumSize(ROOT_WIDTH, ROOT_HEIGHT)
+        self.setMinimumSize(760, 560)
         self.resize(ROOT_WIDTH, ROOT_HEIGHT)
 
         root = QWidget()
         self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        shell = QVBoxLayout(root)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+
+        header = QWidget()
+        header.setObjectName("appHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(24, 14, 24, 14)
+        title_stack = QVBoxLayout()
+        title_stack.setSpacing(1)
+        title = QLabel(_("Deep-Live-Cam"))
+        title.setObjectName("appTitle")
+        subtitle = QLabel(_("Choose a face, select a target, then preview or create your result."))
+        subtitle.setObjectName("appSubtitle")
+        title_stack.addWidget(title)
+        title_stack.addWidget(subtitle)
+        header_layout.addLayout(title_stack)
+        header_layout.addStretch(1)
+        badge = QLabel(_("GitHub Edition"))
+        badge.setObjectName("editionBadge")
+        header_layout.addWidget(badge)
+        shell.addWidget(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        content.setObjectName("appContent")
+        scroll.setWidget(content)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(24, 18, 24, 20)
+        layout.setSpacing(15)
+        shell.addWidget(scroll, 1)
 
         # Source/Target row
         layout.addLayout(self._build_image_row())
@@ -523,24 +556,23 @@ class MainWindow(QMainWindow):
         # Sliders card
         layout.addWidget(self._build_sliders_card())
 
-        # Action buttons
-        layout.addLayout(self._build_action_row())
-
         # Camera selection
         layout.addWidget(self._build_camera_card())
 
-        # Status & footer
-        self._status_label = QLabel("")
+        # Status remains visible while settings scroll.
+        footer = QWidget()
+        footer.setObjectName("appFooter")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(24, 10, 24, 10)
+        self._status_label = QLabel(_("Ready. Select a source face and a target."))
         self._status_label.setObjectName("statusLabel")
-        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._status_label)
-
-        footer = QLabel("Deep Live Cam")
-        footer.setObjectName("linkLabel")
-        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer.setCursor(Qt.CursorShape.PointingHandCursor)
-        footer.mousePressEvent = lambda _e: webbrowser.open("https://deeplivecam.net")
-        layout.addWidget(footer)
+        self._status_label.setMinimumWidth(0)
+        self._status_label.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                         QSizePolicy.Policy.Preferred)
+        footer_layout.addWidget(self._status_label, 1)
+        footer_layout.addLayout(self._build_action_row())
+        shell.addWidget(footer)
+        self._update_input_actions()
 
     # ── image row ────────────────────────────────────────────────────────
 
@@ -549,20 +581,24 @@ class MainWindow(QMainWindow):
         row.setSpacing(16)
 
         # Source column
-        src_col = QVBoxLayout()
+        source_card = QGroupBox(_("1. Source face"))
+        src_col = QVBoxLayout(source_card)
+        src_col.setSpacing(10)
         self.source_label = _make_image_drop(_("Source face"), (200, 200))
         src_col.addWidget(self.source_label, alignment=Qt.AlignmentFlag.AlignCenter)
         src_row = QHBoxLayout()
         body_enabled = modules.globals.fp_ui.get("body_swapper", False)
-        self.btn_select_source = QPushButton(_("Select a person" if body_enabled else "Select a face"))
+        self.btn_select_source = QPushButton(_("Select a face"))
+        self.btn_select_source.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                             QSizePolicy.Policy.Fixed)
         self.btn_select_source.setToolTip(
-            _("Choose a full-body source photo" if body_enabled else
+            _("Choose a clear source face for face and skin tone matching" if body_enabled else
               "Choose the source face image to swap onto the target")
         )
         self.btn_select_source.clicked.connect(self._on_select_source)
-        self.btn_random_face = QPushButton("🔄")
+        self.btn_random_face = QPushButton(_("Random"))
         self.btn_random_face.setObjectName("secondary")
-        self.btn_random_face.setFixedWidth(40)
+        self.btn_random_face.setMinimumWidth(80)
         self.btn_random_face.setToolTip(
             _("Get a random face from thispersondoesnotexist.com")
         )
@@ -574,34 +610,38 @@ class MainWindow(QMainWindow):
         # Swap button column
         swap_col = QVBoxLayout()
         swap_col.addStretch(1)
-        self.btn_swap = QPushButton("↔")
+        self.btn_swap = QPushButton(_("Swap"))
         self.btn_swap.setObjectName("secondary")
-        self.btn_swap.setFixedSize(44, 44)
+        self.btn_swap.setFixedSize(64, 38)
         self.btn_swap.setToolTip(_("Swap source and target images"))
         self.btn_swap.clicked.connect(self._on_swap_paths)
         swap_col.addWidget(self.btn_swap, alignment=Qt.AlignmentFlag.AlignCenter)
         swap_col.addStretch(1)
 
         # Target column
-        tgt_col = QVBoxLayout()
+        target_card = QGroupBox(_("2. Target image or video"))
+        tgt_col = QVBoxLayout(target_card)
+        tgt_col.setSpacing(10)
         self.target_label = _make_image_drop(_("Target"), (200, 200))
         tgt_col.addWidget(self.target_label, alignment=Qt.AlignmentFlag.AlignCenter)
         self.btn_select_target = QPushButton(_("Select a target"))
+        self.btn_select_target.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                             QSizePolicy.Policy.Fixed)
         self.btn_select_target.setToolTip(
             _("Choose the target image or video to apply face swap to")
         )
         self.btn_select_target.clicked.connect(self._on_select_target)
         tgt_col.addWidget(self.btn_select_target)
 
-        row.addLayout(src_col)
+        row.addWidget(source_card, 1)
         row.addLayout(swap_col)
-        row.addLayout(tgt_col)
+        row.addWidget(target_card, 1)
         return row
 
     # ── options card ─────────────────────────────────────────────────────
 
     def _build_options_card(self) -> QGroupBox:
-        card = QGroupBox(_("Options"))
+        card = QGroupBox(_("3. Processing options"))
         grid = QGridLayout(card)
         grid.setHorizontalSpacing(20)
         grid.setVerticalSpacing(6)
@@ -631,8 +671,8 @@ class MainWindow(QMainWindow):
         self.sw_show_fps = make("show_fps", "Show FPS",
                                 "Display frames-per-second counter on the live preview")
         self.sw_body_swapper = _Switch(
-            _("Swap body"), modules.globals.fp_ui.get("body_swapper", False),
-            _("Transfer the visible person and clothing from a full-body source photo"),
+            _("Match skin tone"), modules.globals.fp_ui.get("body_swapper", False),
+            _("Match exposed skin to the source while keeping the target clothing"),
         )
         self.sw_body_swapper.toggled.connect(self._on_body_swapper_toggled)
         self.sw_many_faces.toggled.connect(
@@ -680,7 +720,7 @@ class MainWindow(QMainWindow):
     # ── sliders card ─────────────────────────────────────────────────────
 
     def _build_sliders_card(self) -> QGroupBox:
-        card = QGroupBox(_("Refinement"))
+        card = QGroupBox(_("4. Face refinement"))
         grid = QGridLayout(card)
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(10)
@@ -699,12 +739,21 @@ class MainWindow(QMainWindow):
             _("Blend between original and swapped face (0% = original, 100% = fully swapped)")
         )
         grid.addWidget(self.s_transparency, 0, 1)
+        self.transparency_value = QLabel("100%")
+        self.transparency_value.setMinimumWidth(46)
+        grid.addWidget(self.transparency_value, 0, 2)
+        self.s_transparency.valueChanged.connect(
+            lambda value: self.transparency_value.setText(f"{value}%"))
 
         # Sharpness
         grid.addWidget(QLabel(_("Sharpness")), 1, 0)
         self.s_sharpness = slider(0.0, 5.0, 0.0, 10, self._on_sharpness_change)
         self.s_sharpness.setToolTip(_("Sharpen the enhanced face output"))
         grid.addWidget(self.s_sharpness, 1, 1)
+        self.sharpness_value = QLabel("0.0")
+        grid.addWidget(self.sharpness_value, 1, 2)
+        self.s_sharpness.valueChanged.connect(
+            lambda value: self.sharpness_value.setText(f"{value / 10:.1f}"))
 
         # Mouth mask — always starts at 0 (disabled) on launch
         grid.addWidget(QLabel(_("Mouth Mask")), 2, 0)
@@ -716,18 +765,23 @@ class MainWindow(QMainWindow):
             _("0 = use swapped mouth, 100 = expose original mouth to chin area")
         )
         grid.addWidget(self.s_mouth, 2, 1)
+        self.mouth_value = QLabel("0%")
+        grid.addWidget(self.mouth_value, 2, 2)
+        self.s_mouth.valueChanged.connect(
+            lambda value: self.mouth_value.setText(f"{value}%"))
         return card
 
     # ── action row ───────────────────────────────────────────────────────
 
     def _build_action_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        self.btn_start = QPushButton(_("Start"))
+        self.btn_start = QPushButton(_("Create output"))
+        self.btn_start.setMinimumWidth(150)
         self.btn_start.setToolTip(_("Begin processing the target image/video with selected face"))
         self.btn_start.clicked.connect(self._on_start)
 
-        self.btn_destroy = QPushButton(_("Destroy"))
-        self.btn_destroy.setObjectName("danger")
+        self.btn_destroy = QPushButton(_("Quit"))
+        self.btn_destroy.setObjectName("secondary")
         self.btn_destroy.setToolTip(_("Stop processing and close the application"))
         self.btn_destroy.clicked.connect(lambda: self._destroy_cb())
 
@@ -737,14 +791,14 @@ class MainWindow(QMainWindow):
         self.btn_preview.clicked.connect(self._on_toggle_preview)
 
         row.addWidget(self.btn_start)
-        row.addWidget(self.btn_destroy)
         row.addWidget(self.btn_preview)
+        row.addWidget(self.btn_destroy)
         return row
 
     # ── camera card ──────────────────────────────────────────────────────
 
     def _build_camera_card(self) -> QGroupBox:
-        card = QGroupBox(_("Camera"))
+        card = QGroupBox(_("Live camera"))
         grid = QGridLayout(card)
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(6)
@@ -852,6 +906,19 @@ class MainWindow(QMainWindow):
 
     def set_status(self, text: str) -> None:
         self._status_label.setText(text)
+        self._status_label.setToolTip(text)
+
+    def _update_input_actions(self) -> None:
+        source_ready = bool(modules.globals.source_path and
+                            is_image(modules.globals.source_path))
+        target_ready = bool(modules.globals.target_path and
+                            (is_image(modules.globals.target_path) or
+                             is_video(modules.globals.target_path)))
+        self.btn_start.setEnabled(source_ready and target_ready)
+        self.btn_preview.setEnabled(source_ready and target_ready)
+        self.btn_swap.setEnabled(source_ready and target_ready and
+                                 is_image(modules.globals.target_path))
+        self.btn_live.setEnabled(source_ready and bool(self._camera_indices))
 
     def _on_select_source(self) -> None:
         global _RECENT_SOURCE_DIR
@@ -873,6 +940,7 @@ class MainWindow(QMainWindow):
             modules.globals.source_path = None
             self.source_label.clear()
             self.source_label.setText(_("Source face"))
+        self._update_input_actions()
 
     def _on_select_target(self) -> None:
         global _RECENT_TARGET_DIR
@@ -901,6 +969,7 @@ class MainWindow(QMainWindow):
             modules.globals.target_path = None
             self.target_label.clear()
             self.target_label.setText(_("Target"))
+        self._update_input_actions()
 
     def _on_random_face(self) -> None:
         if _PREVIEW is not None:
@@ -937,6 +1006,7 @@ class MainWindow(QMainWindow):
             modules.globals.source_path = temp_path
             self.source_label.setPixmap(pixmap)
             self.source_label.setText("")
+            self._update_input_actions()
         except Exception as exc:
             print(f"Failed to fetch random face: {exc}")
 
@@ -955,6 +1025,7 @@ class MainWindow(QMainWindow):
         self.target_label.setPixmap(render_image_preview(sp, (200, 200)))
         self.source_label.setText("")
         self.target_label.setText("")
+        self._update_input_actions()
 
     def _on_map_faces_toggled(self, value: bool) -> None:
         modules.globals.map_faces = value
@@ -969,15 +1040,15 @@ class MainWindow(QMainWindow):
             self.sw_map_faces.setChecked(False)
         if value and modules.globals.many_faces:
             self.sw_many_faces.setChecked(False)
-        self.btn_select_source.setText(_("Select a person") if value else _("Select a face"))
+        self.btn_select_source.setText(_("Select a face"))
         self.btn_select_source.setToolTip(_(
-            "Choose a full-body source photo" if value else
+            "Choose a clear source face for face and skin tone matching" if value else
             "Choose the source face image to swap onto the target"
         ))
         if value and _WEBCAM_PREVIEW is not None and _WEBCAM_PREVIEW.isVisible():
             from modules.processors.frame import body_swapper
             if not body_swapper.pre_check() or not body_swapper.pre_start():
-                update_status("Body swap needs a full-body source photo and MediaPipe model")
+                update_status("Skin tone matching needs a clear source face and MediaPipe model")
                 self.sw_body_swapper.setChecked(False)
                 return
         _update_tumbler("body_swapper", value)
@@ -1093,7 +1164,7 @@ class MainWindow(QMainWindow):
             if modules.globals.fp_ui.get("body_swapper", False):
                 from modules.processors.frame import body_swapper
                 if not body_swapper.pre_check() or not body_swapper.pre_start():
-                    update_status("Body swap needs a full-body source photo and MediaPipe model")
+                    update_status("Skin tone matching needs a clear source face and MediaPipe model")
                     return
             if "face_swapper" in modules.globals.frame_processors:
                 from modules.face_analyser import get_face_analyser
@@ -1167,7 +1238,7 @@ class PreviewWindow(QWidget):
         if modules.globals.fp_ui.get("body_swapper", False):
             from modules.processors.frame import body_swapper
             if not body_swapper.pre_check() or not body_swapper.pre_start():
-                update_status("Body swap needs a full-body source photo and MediaPipe model")
+                update_status("Skin tone matching needs a clear source face and MediaPipe model")
                 return
         processors = _gfpm(modules.globals.frame_processors)
         source_face = (get_one_face(source_frame) if any(

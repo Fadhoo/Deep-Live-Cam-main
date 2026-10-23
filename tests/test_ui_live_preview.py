@@ -269,11 +269,16 @@ class RandomFaceDownloadTest(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(target) and os.remove(target))
         fresh = self._good_jpeg()
 
-        stub = type("Stub", (), {"source_label": self._Label()})()
+        updated = []
+        stub = type("Stub", (), {
+            "source_label": self._Label(),
+            "_update_input_actions": lambda _self: updated.append(True),
+        })()
         with patch.object(ui.requests, "get", lambda *_a, **_kw: self._Response(fresh)):
             ui.MainWindow._on_random_face(stub)
 
         self.assertEqual(modules.globals.source_path, target)
+        self.assertEqual(updated, [True])
         with open(target, "rb") as handle:
             self.assertEqual(handle.read(), fresh)
 

@@ -115,20 +115,22 @@ same effect blend.
 
 ## Features & Uses - Everything is in real-time
 
-### Experimental body swap
+### Skin tone matching
 
-Enable **Swap body** in the desktop app to transfer the visible body and
-clothing from a full-body source photo to one person in a webcam, image, or
-video. The body stage runs before face swapping, so the existing face model
-replaces the face afterward. For CLI processing, include
+Enable **Match skin tone** in the desktop app to apply the source person's skin
+tone to exposed skin on one target person in a webcam, image, or video. The
+target's clothing, body shape, and background stay in place. The skin stage
+runs before face swapping. For CLI processing, include
 `--frame-processor body_swapper face_swapper`. The MediaPipe pose model is
 downloaded into `models/` on first use.
 
-Use a source photo with the full person visible, preferably facing the same
-direction as the target. This uses pose-guided 2-D warping and segmentation:
-it cannot create unseen sides of a person, handle large turns cleanly, or
-match every occlusion. It currently supports one person and cannot be used
-with Map faces. Live frame rate depends on camera resolution and CPU speed.
+Use a clear source face photo. The processor estimates skin colour from the
+face and exposed limbs, then changes only target pixels that resemble skin
+within pose-guided arm, leg, hand, foot, and neck regions. It leaves a frame
+unchanged when it cannot identify skin reliably. Similar-coloured clothing or
+unusual lighting can still confuse this conservative mask. It supports one
+person and cannot be used with Map faces. See
+[research and limitations](docs/body-swap-research.md).
 
 ### Mouth Mask
 

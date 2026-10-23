@@ -1,8 +1,4 @@
-"""Pose-guided, single-person appearance transfer from a full-body photo.
-
-This is a 2-D compositor, not a generative model. It can only reuse pixels
-visible in the reference image; large turns and occlusions cannot be invented.
-"""
+"""Transfer source skin tone to exposed target skin without changing clothing."""
 
 import os
 import threading
@@ -28,26 +24,27 @@ _landmarker = None
 _source_path = None
 _source_image = None
 _source_result = None
+_source_skin = None
 
 
 def pre_check() -> bool:
     try:
         import mediapipe  # noqa: F401
     except ImportError:
-        print(f"[{NAME}] Install mediapipe to use body swapping.")
+        print(f"[{NAME}] Install mediapipe to use skin tone matching.")
         return False
     return True
 
 
 def pre_start() -> bool:
     if modules.globals.map_faces:
-        print(f"[{NAME}] Body swapping currently supports one person; turn off Map faces.")
+        print(f"[{NAME}] Skin tone matching currently supports one person; turn off Map faces.")
         return False
     if modules.globals.many_faces:
-        print(f"[{NAME}] Body swapping currently supports one person; turn off Many faces.")
+        print(f"[{NAME}] Skin tone matching currently supports one person; turn off Many faces.")
         return False
     if not modules.globals.source_path:
-        print(f"[{NAME}] Select a full-body source image first.")
+        print(f"[{NAME}] Select a source face image first.")
         return False
     try:
         model_path = os.path.join(MODELS_DIR, MODEL_NAME)
@@ -92,7 +89,7 @@ def _valid(result: Any) -> bool:
 
 
 def _load_source(path: str) -> bool:
-    global _source_path, _source_image, _source_result
+    global _source_path, _source_image, _source_result, _source_skin
     if path == _source_path and _source_image is not None:
         return True
     source = imread_unicode(path)
@@ -100,148 +97,168 @@ def _load_source(path: str) -> bool:
         print(f"[{NAME}] Cannot read source image: {path}")
         return False
     result = _detect(source)
-    if not _valid(result):
-        print(f"[{NAME}] No visible body found in source image: {path}")
+    skin = _skin_reference(source, result) if _valid(result) else None
+    if skin is None:
+        from modules.face_analyser import get_one_face
+
+        face = get_one_face(source)
+        skin = _skin_reference(source, None, face)
+    if skin is None:
+        print(f"[{NAME}] Source needs a clearly visible face or exposed skin: {path}")
         return False
-    _source_path, _source_image, _source_result = path, source, result
+    _source_path, _source_image, _source_result, _source_skin = path, source, result, skin
     return True
 
 
-def _mask_and_bounds(result: Any, shape: tuple) -> tuple[np.ndarray, tuple] | None:
+def _person_mask(result: Any, shape: tuple) -> np.ndarray | None:
     height, width = shape[:2]
     mask = np.asarray(result.segmentation_masks[0].numpy_view(), dtype=np.float32)
     if mask.shape != (height, width):
         mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR)
-    # MediaPipe returns a confidence map, not an opacity map. Using it as
-    # opacity makes clothing and limbs translucent even for confident poses.
-    mask = (mask > 0.45).astype(np.float32)
-    ys, xs = np.where(mask > 0)
-    if len(xs) < 100:
+    # Segmentation is a confidence score. Keep only the largest person-shaped
+    # component so stray detections cannot bring source pixels into the scene.
+    binary = (mask > 0.5).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, 8)
+    if count < 2:
         return None
-    return mask, (float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()))
+    component = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    if stats[component, cv2.CC_STAT_AREA] < 100:
+        return None
+    return (labels == component).astype(np.uint8)
 
 
-def _control_points(source_result, target_result, source_shape, target_shape,
-                    source_bounds, target_bounds):
-    sh, sw = source_shape[:2]
-    th, tw = target_shape[:2]
-    src, dst = [], []
-    # Joint positions anchor the articulated warp. A point is used only when
-    # visible in both images so hidden limbs do not pull nearby triangles.
-    for index in (0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32):
-        a = source_result.pose_landmarks[0][index]
-        b = target_result.pose_landmarks[0][index]
-        if min(a.visibility or 0, b.visibility or 0) < 0.5:
-            continue
-        src.append((float(np.clip(a.x * sw, 0, sw - 1)),
-                    float(np.clip(a.y * sh, 0, sh - 1))))
-        dst.append((float(np.clip(b.x * tw, 0, tw - 1)),
-                    float(np.clip(b.y * th, 0, th - 1))))
-
-    # Silhouette anchors let the source mask extend beyond the skeleton.
-    for u, v in ((0, 0), (.5, 0), (1, 0), (1, .5), (1, 1),
-                 (.5, 1), (0, 1), (0, .5)):
-        src.append((source_bounds[0] + u * (source_bounds[2] - source_bounds[0]),
-                    source_bounds[1] + v * (source_bounds[3] - source_bounds[1])))
-        dst.append((target_bounds[0] + u * (target_bounds[2] - target_bounds[0]),
-                    target_bounds[1] + v * (target_bounds[3] - target_bounds[1])))
-
-    unique_src, unique_dst = [], []
-    for a, b in zip(src, dst):
-        if all(np.linalg.norm(np.subtract(a, prior)) > 2 for prior in unique_src):
-            unique_src.append(a)
-            unique_dst.append(b)
-    return np.asarray(unique_src, np.float32), np.asarray(unique_dst, np.float32)
-
-
-def _triangles(points: np.ndarray, shape: tuple):
+def _point(landmarks: list, index: int, shape: tuple) -> tuple[int, int] | None:
+    landmark = landmarks[index]
+    if (landmark.visibility or 0) < 0.55:
+        return None
     height, width = shape[:2]
-    subdiv = cv2.Subdiv2D((0, 0, width, height))
-    for x, y in points:
-        subdiv.insert((float(np.clip(x, 0, width - 1)),
-                       float(np.clip(y, 0, height - 1))))
-    for triangle in subdiv.getTriangleList().reshape(-1, 3, 2):
-        indices = []
-        for vertex in triangle:
-            distances = np.linalg.norm(points - vertex, axis=1)
-            index = int(np.argmin(distances))
-            if distances[index] > 3:
-                break
-            indices.append(index)
-        if len(indices) == 3 and len(set(indices)) == 3:
-            yield indices
+    x, y = landmark.x * width, landmark.y * height
+    if not (0 <= x < width and 0 <= y < height):
+        return None
+    return int(x), int(y)
 
 
-def _warp_triangle(source, source_mask, canvas, canvas_mask, src_tri, dst_tri):
-    if abs(cv2.contourArea(src_tri)) < 1 or abs(cv2.contourArea(dst_tri)) < 1:
-        return
-    sh, sw = source.shape[:2]
-    th, tw = canvas.shape[:2]
-    sx, sy, sx2, sy2 = cv2.boundingRect(src_tri)
-    dx, dy, dw, dh = cv2.boundingRect(dst_tri)
-    sx0, sy0 = max(sx, 0), max(sy, 0)
-    sx1, sy1 = min(sx + sx2, sw), min(sy + sy2, sh)
-    dx0, dy0 = max(dx, 0), max(dy, 0)
-    dx1, dy1 = min(dx + dw, tw), min(dy + dh, th)
-    if sx1 <= sx0 or sy1 <= sy0 or dx1 <= dx0 or dy1 <= dy0:
-        return
-    transform = cv2.getAffineTransform(
-        (src_tri - (sx0, sy0)).astype(np.float32),
-        (dst_tri - (dx0, dy0)).astype(np.float32),
-    )
-    size = (dx1 - dx0, dy1 - dy0)
-    warped = cv2.warpAffine(source[sy0:sy1, sx0:sx1], transform, size,
-                            flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-    alpha = cv2.warpAffine(source_mask[sy0:sy1, sx0:sx1], transform, size,
-                           flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
-    triangle_mask = np.zeros((size[1], size[0]), dtype=np.float32)
-    cv2.fillConvexPoly(triangle_mask, np.round(dst_tri - (dx0, dy0)).astype(np.int32), 1)
-    alpha *= triangle_mask
-    region = canvas[dy0:dy1, dx0:dx1]
-    existing = canvas_mask[dy0:dy1, dx0:dx1]
-    use = alpha > 0.01
-    region[use] = warped[use]
-    existing[use] = alpha[use]
+def _face_sample(lab: np.ndarray, result: Any, person_mask: np.ndarray,
+                 face: Any = None):
+    """Estimate skin chroma from two small cheek patches, away from eyes/lips."""
+    if face is not None and getattr(face, 'bbox', None) is not None:
+        x1, y1, x2, y2 = face.bbox
+        face_width = x2 - x1
+        centers = ((int(x1 + face_width * .32), int(y1 + (y2 - y1) * .55)),
+                   (int(x1 + face_width * .68), int(y1 + (y2 - y1) * .55)))
+    else:
+        if result is None or not result.pose_landmarks:
+            return None
+        landmarks = result.pose_landmarks[0]
+        nose = _point(landmarks, 0, lab.shape)
+        if nose is None:
+            return None
+        left_ear = _point(landmarks, 7, lab.shape)
+        right_ear = _point(landmarks, 8, lab.shape)
+        left_eye = _point(landmarks, 2, lab.shape)
+        right_eye = _point(landmarks, 5, lab.shape)
+        if left_ear and right_ear:
+            face_width = np.linalg.norm(np.subtract(left_ear, right_ear))
+        elif left_eye and right_eye:
+            face_width = 1.8 * np.linalg.norm(np.subtract(left_eye, right_eye))
+        else:
+            return None
+        centers = tuple((int(nose[0] + direction * face_width * .22),
+                         int(nose[1] + face_width * .04))
+                        for direction in (-1, 1))
+    if face_width < 8:
+        return None
+    radius = max(2, int(face_width * .09))
+    patch = np.zeros(lab.shape[:2], np.uint8)
+    for center in centers:
+        cv2.circle(patch, center, radius, 1, -1)
+    pixels = lab[(patch & person_mask) > 0]
+    if len(pixels) < 8:
+        return None
+    return np.median(pixels, axis=0)
 
 
-def _composite(source, source_result, target, target_result):
-    source_data = _mask_and_bounds(source_result, source.shape)
-    target_data = _mask_and_bounds(target_result, target.shape)
-    if source_data is None or target_data is None:
+def _body_regions(result: Any, shape: tuple) -> np.ndarray:
+    """Conservative limb/neck regions; torso garments are never candidates."""
+    landmarks = result.pose_landmarks[0]
+    height, width = shape[:2]
+    regions = np.zeros((height, width), np.uint8)
+    left = _point(landmarks, 11, shape)
+    right = _point(landmarks, 12, shape)
+    if left is None or right is None:
+        return regions
+    shoulder_width = np.linalg.norm(np.subtract(left, right))
+    if shoulder_width < 8:
+        return regions
+    for a, b, fraction in (
+        (11, 13, .23), (13, 15, .18), (12, 14, .23), (14, 16, .18),
+        (23, 25, .30), (25, 27, .22), (24, 26, .30), (26, 28, .22),
+        (15, 19, .16), (16, 20, .16), (27, 31, .19), (28, 32, .19),
+    ):
+        start = _point(landmarks, a, shape)
+        end = _point(landmarks, b, shape)
+        if start and end:
+            cv2.line(regions, start, end, 1,
+                     thickness=max(3, int(shoulder_width * fraction)))
+    # Neck only: stop at the shoulder line so shirts are preserved.
+    nose = _point(landmarks, 0, shape)
+    if nose:
+        midpoint = ((left[0] + right[0]) // 2, (left[1] + right[1]) // 2)
+        start = (int(nose[0] * .4 + midpoint[0] * .6),
+                 int(nose[1] * .4 + midpoint[1] * .6))
+        cv2.line(regions, start, midpoint, 1,
+                 thickness=max(3, int(shoulder_width * .18)))
+    return regions
+
+
+def _skin_candidates(lab: np.ndarray, result: Any, person_mask: np.ndarray,
+                     face_color: np.ndarray) -> np.ndarray:
+    regions = _body_regions(result, lab.shape)
+    chroma = lab[:, :, 1:3].astype(np.float32)
+    distance = np.linalg.norm(chroma - face_color[1:3], axis=2)
+    return ((regions > 0) & (person_mask > 0) & (distance < 24)).astype(np.uint8)
+
+
+def _skin_reference(frame: np.ndarray, result: Any,
+                    face: Any = None) -> np.ndarray | None:
+    person_mask = _person_mask(result, frame.shape) if result is not None else None
+    if person_mask is None:
+        if face is None:
+            return None
+        person_mask = np.ones(frame.shape[:2], np.uint8)
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    face_color = _face_sample(lab, result, person_mask, face)
+    if face_color is None:
+        return None
+    if result is not None and _valid(result):
+        candidates = _skin_candidates(lab, result, person_mask, face_color)
+        if np.count_nonzero(candidates) >= 40:
+            return np.median(lab[candidates > 0], axis=0)
+    return face_color
+
+
+def _composite(source, source_result, target, target_result, source_skin=None):
+    if source_skin is None:
+        source_skin = _skin_reference(source, source_result)
+    target_mask = _person_mask(target_result, target.shape)
+    if source_skin is None or target_mask is None:
         return target
-    source_mask, source_bounds = source_data
-    target_mask, target_bounds = target_data
-    src_points, dst_points = _control_points(
-        source_result, target_result, source.shape, target.shape,
-        source_bounds, target_bounds,
-    )
-    canvas = np.zeros_like(target)
-    canvas_mask = np.zeros(target.shape[:2], dtype=np.float32)
-    for indices in _triangles(src_points, source.shape):
-        _warp_triangle(source, source_mask, canvas, canvas_mask,
-                       src_points[indices], dst_points[indices])
-    alpha = np.minimum(canvas_mask, target_mask)
-    alpha = cv2.GaussianBlur(alpha, (7, 7), 0)
-    # Leave the head to the dedicated face swapper. A triangular body mesh
-    # stretches the eyes and mouth when the head turns or mirrors.
-    landmarks = target_result.pose_landmarks[0]
-    nose = landmarks[0]
-    left, right = landmarks[11], landmarks[12]
-    if min(nose.visibility or 0, left.visibility or 0, right.visibility or 0) > 0.5:
-        height, width = target.shape[:2]
-        shoulder_width = abs(left.x - right.x) * width
-        shoulder_y = (left.y + right.y) * height / 2
-        nose_y = nose.y * height
-        head_mask = np.zeros((height, width), np.float32)
-        center = (int(nose.x * width), int(nose_y + .15 * (shoulder_y - nose_y)))
-        radius = (max(1, int(shoulder_width * .38)),
-                  max(1, int(abs(shoulder_y - nose_y) * 1.35)))
-        cv2.ellipse(head_mask, center, radius, 0, 0, 360, 1, -1)
-        head_mask = cv2.GaussianBlur(head_mask, (21, 21), 0)
-        alpha *= 1 - head_mask
-    alpha = alpha[:, :, None]
-    return np.clip(canvas.astype(np.float32) * alpha +
-                   target.astype(np.float32) * (1 - alpha), 0, 255).astype(np.uint8)
+    lab = cv2.cvtColor(target, cv2.COLOR_BGR2LAB)
+    face = _face_sample(lab, target_result, target_mask)
+    if face is None:
+        return target
+    candidates = _skin_candidates(lab, target_result, target_mask, face)
+    if not np.any(candidates):
+        return target
+    target_skin = np.median(lab[candidates > 0], axis=0)
+    delta = np.clip(source_skin - target_skin, [-100, -35, -35], [100, 35, 35])
+    alpha = np.minimum(cv2.distanceTransform(candidates, cv2.DIST_L2, 3) / 3,
+                       1.0)[:, :, None]
+    changed = np.clip(lab.astype(np.float32) + delta * alpha, 0, 255).astype(np.uint8)
+    recolored = cv2.cvtColor(changed, cv2.COLOR_LAB2BGR)
+    output = target.copy()
+    output[candidates > 0] = recolored[candidates > 0]
+    return output
 
 
 def process_frame(source_face, temp_frame, target_face=None):
@@ -255,7 +272,8 @@ def process_frame(source_face, temp_frame, target_face=None):
         result = _detect(temp_frame)
         if not _valid(result):
             return temp_frame
-        return _composite(_source_image, _source_result, temp_frame, result)
+        return _composite(_source_image, _source_result, temp_frame, result,
+                          _source_skin)
 
 
 def process_frame_v2(temp_frame, temp_frame_path=""):
